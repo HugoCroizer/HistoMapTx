@@ -1,7 +1,7 @@
 # HistoMap
-
+<img src="figures/logo.png" align="right" width="150px" />
 HistoMap is a Python library for analyzing and visualizing histological annotations alongside spatially resolved transcriptomics data (Visium). It provides tools for processing, analyzing, and visualizing GeoJSON-based tissue annotations with spatial transcriptomics spot data.
-<br><img src="figures/logo.png" align="right" width="150px" />
+
 
 ## Features
 
