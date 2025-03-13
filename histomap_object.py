@@ -1,0 +1,632 @@
+import geopandas as gpd
+import pandas as pd
+import ast
+import gzip
+import io
+import zipfile
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import warnings
+import spatialdata
+import spatialdata_io
+import geopandas as gpd
+from shapely.geometry import Polygon, Point
+from rtree import index
+import numpy as np
+from . import histomap_utils
+import rasterio
+
+class HistoMap:
+    def __init__(self, file_name, visium_spatialdata, full_res_path):
+        self.file_name = file_name
+        self.visium_spatialdata = visium_spatialdata
+        self.data = self.read_geojson_based_on_type(file_name)
+        self.data_exploded = self.data.explode()
+        self._extract_annotations()
+        self.add_area_column()
+        self.spot_geodata = self.generate_spot_geodata()
+        self.overlay_computed = False
+        self.segmentation_dataframe = False
+        self.plotting_image = self._retrieve_hires_image_from_spatialdata()
+        self.full_res_path = full_res_path
+        self.full_res_height, self.full_res_width = self._get_full_res_dimensions()
+        self.tissue_detection = False
+        self.activated_annotations = self.data_exploded['Annotation'].unique()
+        self.disabled_annotations = []
+        self.positive_threshold = self._setup_positive_threshold()
+        self._setup_plot_order()
+        
+            
+    def __str__(self):
+        try:
+            unique_annotations = self.data_exploded['Annotation'].unique()
+            num_annotations = len(unique_annotations)
+        except KeyError:
+            unique_annotations = []
+            num_annotations = 0
+
+        statement = (
+            f"HistoMap Object\n\n"
+            f"--------Annotation--------\n"
+            f"📂 Annotation file used: {self.file_name}\n"
+            f"📂 Full resolution image used: {self.full_res_path}\n"
+            f"🔢 Number of annotations present: {num_annotations}\n"
+            f"🏷 Annotations: {', '.join(map(str, unique_annotations)) if num_annotations > 0 else 'N/A'}"
+            f"\n🏷 Activated annotations: {', '.join(map(str, self.activated_annotations)) if num_annotations > 0 else 'N/A'}"
+            f"\n🏷 Disabled annotations: {', '.join(map(str, self.disabled_annotations)) if num_annotations > 0 else 'None'}"
+            f"\n\n-------Spatial Data--------\n"
+            f"{self.visium_spatialdata}\n\n"
+            f"-----HistoMap Workflow------\n"
+
+        )
+        
+        return statement
+    
+    def _setup_positive_threshold(self):
+        """Get the annotation and set the positive threshold to 50% by default"""
+        return  pd.DataFrame({"annotation": self.activated_annotations, "threshold": 50, "Overlay":False})
+
+    def change_positive_threshold(self, new_threshold):
+        """Update threshold values based on the provided dictionary, with validation"""
+        for annotation, threshold in new_threshold.items():
+            if annotation not in self.positive_threshold['annotation'].values:
+                raise ValueError(f"Annotation '{annotation}' not found in the DataFrame.")
+            if not (0 <= threshold <= 100):
+                raise ValueError(f"Threshold for '{annotation}' must be between 0 and 100.")
+
+            # Check if Overlay is True for the annotation
+            overlay_status = self.positive_threshold.loc[
+                self.positive_threshold['annotation'] == annotation, 'Overlay'
+            ].values[0]  # Extract the value as a boolean
+
+            if not overlay_status:
+                raise ValueError(
+                    f"Overlay for '{annotation}' should be computed first using compute_annotation_overlap."
+                )
+
+            # Apply updates
+            self.positive_threshold.loc[self.positive_threshold['annotation'] == annotation, 'threshold'] = threshold
+            self.set_positive(annotation, threshold)
+
+    def set_positive(self, annotation, threshold):
+        """Set the positive column for the given annotation and threshold."""
+        if annotation+'_positive' not in self.spot_geodata.columns:
+            self.spot_geodata[annotation+'_positive'] = False  # Initialize the column if not present
+
+        # Update 'Annotation_positive' based on the given threshold
+        self.spot_geodata[annotation+'_positive'] = self.spot_geodata[annotation+"_overlap"] >= threshold
+
+        print(f"Updated 'Annotation_positive' for '{annotation}' with threshold {threshold}%.")
+
+    def display_positive_threshold(self):
+        """Return the threshold DataFrame"""
+        return self.positive_threshold.copy()  # Return a copy to prevent accidental modifications
+
+    def _get_full_res_dimensions(self):
+        """ Return the width and height of full resolution image"""
+        image = rasterio.open(self.full_res_path)
+        return image.height, image.width
+
+
+    def _retrieve_hires_image_from_spatialdata(self):
+        """ Recover the hires image from spatialdata object"""
+        image_key = next((k for k in self.visium_spatialdata.images.keys() if k.endswith("hires_image")), None)
+        if image_key:
+            return self.visium_spatialdata.images[image_key]
+        else:
+            return None
+
+    def generate_spot_geodata(self):
+        """Function to generate a dataframe from the spatialdata object as circle geodata"""
+        # Extract spatial coordinates from the GeoDataFrame in the Shapes section
+        image_id = list(self.visium_spatialdata.shapes.keys())[0] 
+        coords = self.visium_spatialdata.shapes[image_id]  # GeoDataFrame with spot coordinates
+
+        # Extract the spot diameter from the scalefactors and convert it to radius
+        spot_radius = float(self.visium_spatialdata.shapes[image_id]['radius'][0])
+
+        # Create circular polygons for each spot using the coordinates and radius
+        gdf = gpd.GeoDataFrame(
+            {"spot_id": range(len(coords))},  # Assign unique spot IDs
+            geometry=[Point(x, y).buffer(spot_radius) for x, y in zip(coords.geometry.x, coords.geometry.y)],  # Buffer creates circle
+            #crs="EPSG:4326"  # Uncomment and set CRS if necessary
+        )
+        return gdf
+
+    def read_geojson_based_on_type(self, file_name):
+        """Function to detect file type and read the file accordingly"""
+        if file_name.endswith('.gz'):
+            with gzip.open(file_name, 'rb') as f:
+                return gpd.read_file(io.BytesIO(f.read()))
+        elif zipfile.is_zipfile(file_name):
+            with zipfile.ZipFile(file_name, 'r') as zip_ref:
+                geojson_file = zip_ref.namelist()[0]
+                with zip_ref.open(geojson_file) as f:
+                    return gpd.read_file(f)
+        elif file_name.endswith('.geojson'):
+            return gpd.read_file(file_name)
+        else:
+            raise ValueError("Unsupported file format")
+
+    def _extract_annotations(self):
+        """Extract annotations from 'classification' column and compute area."""
+        self.data_exploded['classification'] = self.data_exploded['classification'].apply(ast.literal_eval)
+        self.data_exploded['Annotation'] = self.data_exploded['classification'].apply(lambda x: x.get('name', None))
+
+    def _setup_plot_order(self):
+        """Set up the plot_order based on the alphabetical order of annotations."""
+        # Initialize plot_order if it doesn't exist
+        if 'plot_order' not in self.data_exploded.columns:
+            # Sort annotations alphabetically and assign a plot_order
+            sorted_annotations = sorted(self.data_exploded['Annotation'].unique())
+            
+            # Create a mapping from annotation to plot_order based on alphabetical order
+            annotation_to_order = {annotation: idx for idx, annotation in enumerate(sorted_annotations)}
+            
+            # Assign the plot_order based on the sorted order
+            self.data_exploded['plot_order'] = self.data_exploded['Annotation'].map(annotation_to_order)
+
+        # Sort the data by the plot_order
+        self.data_exploded = self.data_exploded.sort_values(by='plot_order', ascending=True)
+
+    def add_segmentation(self, segmentation_file, file_type="geojson"):
+        """ read geojson segmentation from qupath and return a segmentation dataset """
+        if file_type=="geojson":
+            gpd = self.read_geojson_based_on_type(segmentation_file)
+        else:
+            raise ValueError("Only geojson files are supported now")
+        # Convert 'measurements' to JSON 
+        gpd['measurements'] = gpd['measurements'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+
+        # Now extract the key-value pairs and add them as columns
+        measurements_df = gpd['measurements'].apply(pd.Series)
+
+        # Concatenate the new columns with the original GeoDataFrame
+        gpd = pd.concat([gpd, measurements_df], axis=1)
+        # Only keep annotations identified as cells 
+        gpd = gpd[gpd['objectType'] == 'cell']
+        self.segmentation_dataframe = gpd
+        print(str(gdf.shape[0]) + ' cells detected.') 
+            
+    def add_area_column(self):
+        """Adds an area column to the dataframe (in square units)."""
+        self.data_exploded['area'] = self.data_exploded['geometry'].area
+
+    def generate_summary(self):
+        """Generates a summary DataFrame for only activated annotations."""
+        summary = pd.DataFrame()
+
+        # Filter data to keep only activated annotations
+        filtered_data = self.data_exploded[self.data_exploded['Annotation'].isin(self.activated_annotations)]
+
+        # Compute metrics as before
+        if not filtered_data.empty:
+            summary['total_area'] = filtered_data.groupby('Annotation')['geometry'].apply(lambda x: x.area.sum())
+            summary['total_perimeter'] = filtered_data.groupby('Annotation')['geometry'].apply(lambda x: x.length.sum())
+            summary['polygon_count'] = filtered_data.groupby('Annotation').size()
+
+            total_area = filtered_data.geometry.area.sum()
+            summary['area_fraction'] = summary['total_area'] / total_area if total_area > 0 else 0
+
+            summary.reset_index(inplace=True)
+
+        return summary
+
+    def display_plot_order(self):
+        """Displays the plot order for each annotation in the DataFrame.
+        If plot_order doesn't exist, it assigns a default plot order based on alphabetical annotation."""
+        
+        print("Current Plot Order:")
+        
+        # Check if 'plot_order' exists in the dataframe
+        if 'plot_order' in self.data_exploded.columns:
+            # Sort by 'plot_order' if it exists
+            sorted_data = self.data_exploded[['Annotation', 'plot_order']].sort_values(by='plot_order', ascending=False)
+        else:
+            # If 'plot_order' doesn't exist, create a default plot order based on alphabetical sorting of 'Annotation'
+            # Assign a rank based on the alphabetical order of 'Annotation'
+            self.data_exploded['plot_order'] = self.data_exploded['Annotation'].astype('category').cat.codes
+            
+            # Sort by the default 'plot_order'
+            sorted_data = self.data_exploded[['Annotation', 'plot_order']].sort_values(by='plot_order', ascending=True)
+
+        # Filter out disabled annotations from the plot order display
+        active_annotations = self.data_exploded[self.data_exploded['Annotation'].isin(self.activated_annotations)]
+        
+        unique_annotations = active_annotations[['Annotation', 'plot_order']].drop_duplicates()
+        # Sort by plot_order
+        unique_annotations = unique_annotations.sort_values(by='plot_order', ascending=True)
+        return unique_annotations
+
+
+    def change_plot_order(self, order_list:list):
+        """
+        Changes the plot order in the DataFrame based on the provided list of annotations.
+        The list must contain only activated annotations and must have the same length as self.activated_annotations.
+        No annotations can be missing from the order_list.
+
+        Parameters:
+        - order_list: A list of annotations in the desired plot order (top first).
+        """
+        if not isinstance(order_list, list):
+            raise TypeError('Order_list should be a list of all activated annotations')
+        # Ensure all annotations in the order_list are activated
+        invalid_activated_annotations = set(order_list) - set(self.activated_annotations)
+        
+        if invalid_activated_annotations:
+            raise ValueError(f"The following annotations are not activated and cannot be part of the custom order: {', '.join(invalid_activated_annotations)}. "
+                            f"Activated annotations are: {', '.join(self.activated_annotations)}.")
+        
+        # Check if order_list has the same length as activated_annotations
+        if len(order_list) != len(self.activated_annotations):
+            raise ValueError(f"order_list must have the same length as activated_annotations. "
+                            f"Expected length: {len(self.activated_annotations)}, but got length: {len(order_list)}. "
+                            f"Activated annotations are: {', '.join(self.activated_annotations)}.")
+        
+        # Ensure all annotations in the order_list exist in the DataFrame
+        valid_annotations = set(self.data_exploded['Annotation'].unique())
+        invalid_order_annotations = set(order_list) - valid_annotations
+
+        if invalid_order_annotations:
+            raise ValueError(f"The provided order list contains invalid annotations: {', '.join(invalid_order_annotations)}. Available annotations are: {', '.join(valid_annotations)}.")
+
+        # Ensure no annotations are missing in the order_list
+        missing_annotations = set(self.activated_annotations) - set(order_list)
+        
+        if missing_annotations:
+            raise ValueError(f"The following activated annotations are missing from the order list: {', '.join(missing_annotations)}. "
+                            f"Please include all activated annotations. Activated annotations are: {', '.join(self.activated_annotations)}.")
+
+        # Create a dictionary mapping each annotation to its new plot order
+        plot_order_dict = {annotation: idx for idx, annotation in enumerate(order_list)}
+
+        # Map the annotations in the DataFrame to the new plot order
+        self.data_exploded['plot_order'] = self.data_exploded['Annotation'].map(plot_order_dict)
+
+        # Sort by 'plot_order' in ascending order to plot top annotations first
+        self.data_exploded = self.data_exploded.sort_values('plot_order', ascending=True)
+
+        # Display the updated plot order
+        self.display_plot_order()
+
+
+        
+    def compute_annotation_overlap(self, annotation_names):
+        """Compute overlap, considering specific annotations or all activated annotations if 'all' is passed."""
+        
+        # If 'all' is passed, use all activated annotations
+        if annotation_names == 'all':
+            annotation_names = self.activated_annotations
+
+        # Ensure annotation_names is a list
+        if isinstance(annotation_names, str):
+            annotation_names = [annotation_names]
+
+        # Warn if any annotations are disabled
+        disabled_annotations = [ann for ann in annotation_names if ann not in self.activated_annotations]
+        if disabled_annotations:
+            print(f"Some annotations are disabled and will be ignored: {', '.join(disabled_annotations)}")
+
+        # Remove disabled annotations
+        annotation_names = [ann for ann in annotation_names if ann in self.activated_annotations]
+
+        if not annotation_names:
+            raise ValueError("No valid annotations to compute overlap. They may be disabled.")
+
+        # Check if all annotations exist in data_exploded
+        missing_annotations = [ann for ann in annotation_names if ann not in self.data_exploded['Annotation'].unique()]
+        if missing_annotations:
+            raise ValueError(f"Annotations not found: {', '.join(missing_annotations)}")
+
+        # Create a spatial index for the spots
+        spot_idx = index.Index()
+        for i, spot in self.spot_geodata.iterrows():
+            spot_idx.insert(i, spot.geometry.bounds)
+
+        # Filter the data to include only the selected annotations
+        annotation_subset = self.data_exploded[self.data_exploded['Annotation'].isin(annotation_names)]
+
+        # Compute overlap for the selected annotations
+        self.spot_geodata = histomap_utils.calculate_annotation_overlap(self.spot_geodata, annotation_subset, spot_idx)
+
+        # Call set_positive for each annotation in the list
+        for ann in annotation_names:
+            threshold = self.positive_threshold.loc[self.positive_threshold['annotation'] == ann, 'threshold'].values[0]
+            self.set_positive(ann, threshold)
+
+        # Update Overlay status for the computed annotations
+        self.positive_threshold.loc[
+            self.positive_threshold['annotation'].isin(annotation_names), 'Overlay'
+        ] = True
+
+        print(f"Computed annotation overlap for: {', '.join(annotation_names)}. Updated Overlay status.")
+
+
+
+
+    def compute_tissue_overlap(self, positive, negative=None):
+        """
+        Compute tissue overlap using positive and optional negative annotations.
+        Adds a 'tissue_detection' column to spot_geodata.
+        
+        - `positive`: List or string of annotation names considered as tissue.
+        - `negative`: List or string of annotation names to exclude (optional).
+        """
+
+        # Ensure positive is a list
+        if isinstance(positive, str):
+            positive = [positive]
+        
+        # Validate annotations
+        missing_positive = [ann for ann in positive if ann not in self.data_exploded['Annotation'].unique()]
+        if missing_positive:
+            raise ValueError(f"Positive annotations not found: {', '.join(missing_positive)}")
+
+        if negative:
+            if isinstance(negative, str):
+                negative = [negative]
+            missing_negative = [ann for ann in negative if ann not in self.data_exploded['Annotation'].unique()]
+            if missing_negative:
+                raise ValueError(f"Negative annotations not found: {', '.join(missing_negative)}")
+
+        # Compute overlap for positive annotations
+        self.compute_annotation_overlap(positive)
+        
+        # Create the tissue_detection column
+        self.spot_geodata["tissue_detection"] = self.spot_geodata[[f"{ann}_overlap" for ann in positive]].sum(axis=1)
+
+        # If negative annotations are provided, compute and subtract their overlap
+        if negative:
+            self.compute_annotation_overlap(negative)
+            self.spot_geodata["tissue_detection"] -= self.spot_geodata[[f"{ann}_overlap" for ann in negative]].sum(axis=1)
+
+        # Ensure no negative values after subtraction
+        self.spot_geodata["tissue_detection"] = self.spot_geodata["tissue_detection"].clip(lower=0)
+        self.tissue_detection = True
+
+    def tissue_detection_summary(self):
+        """
+        Generate a summary table with statistics for the tissue detection values.
+
+        Returns:
+        - DataFrame with count, mean, std, min, 25%, 50%, 75%, and max values.
+        """
+        if "tissue_detection" not in self.spot_geodata.columns:
+            raise ValueError("Column 'tissue_detection' not found in spot_geodata. Run compute_tissue_overlap first.")
+
+        # Compute summary statistics
+        summary = self.spot_geodata["tissue_detection"].describe().to_frame().T
+
+        # Rename index for clarity
+        summary.index = ["Tissue Detection Statistics"]
+
+        return summary
+    
+    def filter_tissue_overlap(self, threshold=0):
+        """
+        Filter the HistoMap object based on a tissue detection threshold.
+
+        Parameters:
+        - threshold (float): Minimum tissue detection percentage to keep a spot.
+
+        Returns:
+        - The HistoMap object with filtered spot_geodata and visium_spatialdata.
+        """
+        import copy
+        if "tissue_detection" not in self.spot_geodata.columns:
+            raise ValueError("Column 'tissue_detection' not found in spot_geodata. Run compute_tissue_overlap first.")
+
+        # Subset spot_geodata
+        filtered_spots = self.spot_geodata[self.spot_geodata["tissue_detection"] >= threshold].copy()
+
+        histomap_filtered = copy.deepcopy(self)
+        histomap_filtered.spot_geodata = filtered_spots
+        # Subset visium_spatialdata based on the filtered spot indices
+        histomap_utils.filter_spatialdata(histomap_filtered, filtered_spots.index)
+        return histomap_filtered
+    
+    def disable_annotation(self, annotations):
+        """
+        Move the given annotation(s) to the disabled annotations list.
+        If annotations are present in activated annotations, they are removed from it.
+        Set their plot_order to None.
+
+        Parameters:
+        - annotations: A string or list of annotations to disable.
+        """
+        # Ensure annotations is a list
+        if isinstance(annotations, str):
+            annotations = [annotations]
+
+        # Ensure disabled_annotations exists
+        if not hasattr(self, 'disabled_annotations'):
+            self.disabled_annotations = []
+
+        # Find already disabled annotations
+        already_disabled = [ann for ann in annotations if ann in self.disabled_annotations]
+        if already_disabled:
+            print(f"Annotations already disabled: {', '.join(already_disabled)}")
+
+        # Find annotations that can be disabled
+        to_disable = [ann for ann in annotations if ann in self.activated_annotations]
+
+        if not to_disable:
+            print("No new annotations to disable.")
+            return
+
+        # Remove from activated annotations and add to disabled_annotations
+        self.activated_annotations = [ann for ann in self.activated_annotations if ann not in to_disable]
+        self.disabled_annotations = list(set(self.disabled_annotations) | set(to_disable))
+
+        # Set the plot order of the disabled annotations to None
+        self.data_exploded.loc[self.data_exploded['Annotation'].isin(to_disable), 'plot_order'] = None
+
+        # Re-adjust the plot order of the remaining activated annotations (renumber them)
+        remaining_activated = self.data_exploded[self.data_exploded['Annotation'].isin(self.activated_annotations)]
+
+        # Group by 'Annotation' and assign a unique plot_order to each group
+        remaining_activated['plot_order'] = remaining_activated.groupby('Annotation').ngroup()
+
+        # Update plot_order for matching annotations directly
+        for _, row in remaining_activated.iterrows():
+            self.data_exploded.loc[self.data_exploded['Annotation'] == row['Annotation'], 'plot_order'] = row['plot_order']
+
+        # Print updated lists for feedback
+        print(f"Updated activated annotations: {self.activated_annotations}")
+        print(f"Updated disabled annotations: {self.disabled_annotations}")
+
+
+
+
+    def activate_annotation(self, annotations):
+        """
+        Move the given annotation(s) from the disabled annotations list back to the activated annotations list.
+        If annotations are present in disabled annotations, they are removed from it.
+        Set their plot order at the end.
+
+        Parameters:
+        - annotations: A string or list of annotations to activate.
+        """
+        # Ensure annotations is a list
+        if isinstance(annotations, str):
+            annotations = [annotations]
+
+        # Ensure activated_annotations exists
+        if not hasattr(self, 'activated_annotations'):
+            self.activated_annotations = []
+
+        # Find already activated annotations
+        already_activated = [ann for ann in annotations if ann in self.activated_annotations]
+        if already_activated:
+            print(f"Annotations already activated: {', '.join(already_activated)}")
+
+        # Find annotations that can be activated (those in disabled_annotations)
+        to_activate = [ann for ann in annotations if ann in self.disabled_annotations]
+
+        if not to_activate:
+            print("No new annotations to activate.")
+            return
+
+        # Remove from disabled_annotations and add to activated_annotations
+        self.disabled_annotations = [ann for ann in self.disabled_annotations if ann not in to_activate]
+        self.activated_annotations.extend(to_activate)
+
+        # Set the plot order for the activated annotations at the end
+        current_max_plot_order = self.data_exploded['plot_order'].max() if not self.data_exploded['plot_order'].isnull().all() else -1
+        for ann in to_activate:
+            self.data_exploded.loc[self.data_exploded['Annotation'] == ann, 'plot_order'] = current_max_plot_order + 1
+            current_max_plot_order += 1
+
+        # Print updated lists for feedback
+        print(f"Updated activated annotations: {self.activated_annotations}")
+        print(f"Updated disabled annotations: {self.disabled_annotations}")
+
+    
+    def to_anndata(self):
+        """Return a anndata object with metadata from histomap"""
+        adata = self.visium_spatialdata.tables['table'].copy()
+        spot_geodata = self.spot_geodata.copy()
+        # transfer the metadata 
+        df1 = spot_geodata.drop(columns='geometry', inplace=False)
+        df2 = adata.obs
+        df_merged = pd.merge(df2, df1, on='spot_id', how='left')
+        df_merged.index = df2.index
+        adata.obs = df_merged
+        return adata
+    
+    def to_spatialdata(self):
+        """Return a SpatialData object with metadata from HistoMap"""
+        spatialdata_obj = self.visium_spatialdata
+        adata = spatialdata_obj.tables['table'].copy()
+        # transfer the metadata 
+        df1 = self.spot_geodata.drop(columns='geometry')
+        df2 = adata.obs
+        df_merged = pd.merge(df2, df1, on='spot_id', how='left')
+        df_merged.index = df2.index
+        adata.obs = df_merged
+        spatialdata_obj.tables['table'] = adata
+        return spatialdata_obj
+    
+    def spot_metadata_to_df(self):
+        """Return a csv with the metadata"""
+        adata = self.visium_spatialdata.tables['table']
+        # transfer the metadata 
+        df1 = self.spot_geodata.drop(columns='geometry', inplace=False)
+        df2 = self.visium_spatialdata.tables['table'].obs
+        df_merged = pd.merge(df2, df1, on='spot_id', how='left')
+        df_merged.index = df2.index
+        return df_merged
+    
+    def generate_annotation_map(self, annotate_all=True):
+        for annotation in self.activated_annotations:
+            # Check if the annotation exists in 'positive_threshold' with Overlay set to True
+            positive_threshold_row = self.positive_threshold[self.positive_threshold['annotation'] == annotation]
+            
+            if positive_threshold_row.empty:
+                raise ValueError(f"'{annotation}' not found in the object.")
+            
+            if not positive_threshold_row['Overlay'].iloc[0]:
+                raise ValueError(f"Overlap for '{annotation}' was not computed. Run histomap.compute_overlap() first or disable the annotation layer with histomap.disable_annotation().")
+            
+            # Gather the corresponding 'Annotation_positive' column for the annotation
+            positive_column = f"{annotation}_positive"
+
+            # Check if the column exists in self.spot_geodata
+            if positive_column not in self.spot_geodata.columns:
+                raise ValueError(f"Column '{positive_column}' does not exist in 'spot_geodata'.")
+
+            # Create or reset the Annotation_map
+            self.spot_geodata['Annotation_map'] = "None"
+
+            # Get the 'plot_order' for the current annotation
+            plot_order = self.data_exploded.loc[self.data_exploded['Annotation'] == annotation, 'plot_order'].iloc[0]
+
+            # Assign annotations to spots based on positive status and plot_order
+            for idx, row in self.spot_geodata.iterrows():
+                if row[positive_column]:  # If the spot is positive for this annotation
+                    # If the spot is already assigned a positive annotation, check if it should be replaced
+                    if self.spot_geodata.at[idx, 'Annotation_map'] == "None":
+                        self.spot_geodata.at[idx, 'Annotation_map'] = annotation
+                    else:
+                        # If multiple annotations are positive, keep the one with the lowest plot_order
+                        current_annotation = self.spot_geodata.at[idx, 'Annotation_map']
+                        current_plot_order = self.data_exploded.loc[self.data_exploded['Annotation'] == current_annotation, 'plot_order'].iloc[0]
+
+                        if plot_order < current_plot_order:
+                            self.spot_geodata.at[idx, 'Annotation_map'] = annotation
+
+        # After all positive annotations have been processed, if annotate_all is True, handle spots that are still "None"
+        if annotate_all:
+            print("Annotating remaining spots with the most overlapping annotation...")
+
+            for idx, row in self.spot_geodata.iterrows():
+                if row['Annotation_map'] == "None":
+                    # Find the most overlapping annotation for the spot
+                    max_overlap = 0
+                    best_annotation = "None"
+
+                    # Loop over activated annotations and calculate the overlap
+                    for annotation in self.activated_annotations:
+                        overlap_column = f"{annotation}_overlap"
+                        if overlap_column in self.spot_geodata.columns:
+                            overlap = row[overlap_column]
+                            if overlap > max_overlap:
+                                max_overlap = overlap
+                                best_annotation = annotation
+
+                    # If the spot has no overlap with any annotation (max_overlap == 0), it stays "None"
+                    if max_overlap > 0:
+                        self.spot_geodata.at[idx, 'Annotation_map'] = best_annotation
+
+        print('Annotation map successfully generated')
+
+
+    def save(self, filename):
+        """Save the current object to a pickle file."""
+        try:
+            import pickle
+            with open(filename, 'wb') as f:
+                pickle.dump(self, f)
+            print(f"Object saved to {filename}")
+        except Exception as e:
+            print(f"Error saving object: {e}")
