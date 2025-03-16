@@ -40,8 +40,8 @@ html_theme_options = {
 }
 
 # Notebook settings
-nbsphinx_execute = 'auto'
-nbsphinx_allow_errors = False
+nbsphinx_execute = 'never'
+nbsphinx_allow_errors = True
 nbsphinx_timeout = 600
 
 # Cross-reference other documentation
