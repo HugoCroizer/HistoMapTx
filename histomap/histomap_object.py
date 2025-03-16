@@ -35,6 +35,7 @@ class HistoMap:
         self.disabled_annotations = []
         self.positive_threshold = self._setup_positive_threshold()
         self._setup_plot_order()
+        self.annotation_colors = self._setup_annotation_color()
         
             
     def __str__(self):
@@ -62,6 +63,110 @@ class HistoMap:
         
         return statement
     
+    def _setup_annotation_color(self):
+        """
+        Creates a dataframe with columns 'annotation' and 'color' at object initialization.
+        Maps each unique annotation to a distinct color using a color cycle.
+        
+        Returns:
+        pandas.DataFrame: A dataframe containing annotation names and their assigned colors
+        """
+        import matplotlib.colors as mcolors
+        
+        # Get unique annotations
+        unique_annotations = self.data_exploded['Annotation'].unique()
+        
+        # Create a color cycle using default matplotlib color cycle
+        default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        
+        # If we have more annotations than default colors, extend with more colors
+        if len(unique_annotations) > len(default_colors):
+            # Add more colors from matplotlib's tab20 colormap
+            additional_colors = list(mcolors.TABLEAU_COLORS.values())
+            available_colors = default_colors + additional_colors
+        else:
+            available_colors = default_colors
+        
+        # Create the dataframe
+        color_data = []
+        for i, annotation in enumerate(unique_annotations):
+            color_idx = i % len(available_colors)  # Cycle through colors if needed
+            color_data.append({
+                'annotation': annotation,
+                'color': available_colors[color_idx]
+            })
+        
+        annotation_colors = pd.DataFrame(color_data)
+        
+        # Store as instance attribute
+        self.annotation_colors = annotation_colors
+        
+        return annotation_colors
+    
+    def change_annotation_color(self, annotation_color_dict):
+        """
+        Updates the color for specified annotations in the class.
+        
+        Parameters:
+        annotation_color_dict (dict): Dictionary mapping annotation names to colors
+                                    e.g. {"Tumor": "red", "Stroma": "blue"}
+        
+        Returns:
+        bool: True if all updates were successful, False otherwise
+        """
+        import matplotlib.colors as mcolors
+        
+        all_updates_successful = True
+        
+        for annotation, color in annotation_color_dict.items():
+            # Check if annotation exists in the data
+            if annotation not in self.data_exploded['Annotation'].unique():
+                print(f"Warning: Annotation '{annotation}' does not exist in the data.")
+                all_updates_successful = False
+                continue
+            
+            # Validate color
+            try:
+                # This will raise ValueError if color is not recognized
+                mcolors.to_rgba(color)
+                
+                # Update color in the annotation dataframe
+                mask = self.annotation_colors['annotation'] == annotation
+                if any(mask):
+                    self.annotation_colors.loc[mask, 'color'] = color
+                    print(f"Updated color for '{annotation}' to '{color}'")
+                else:
+                    # If annotation exists in data but not in color mapping (unlikely but possible)
+                    new_row = pd.DataFrame({'annotation': [annotation], 'color': [color]})
+                    self.annotation_colors = pd.concat([self.annotation_colors, new_row], ignore_index=True)
+                    print(f"Added color mapping for '{annotation}': '{color}'")
+            except ValueError:
+                print(f"Warning: Color '{color}' is not recognized by matplotlib.")
+                all_updates_successful = False
+        
+        return all_updates_successful
+
+    def display_annotation_color(self):
+        """
+        Prints the dataframe containing annotations and their corresponding colors.
+        
+        Returns:
+        pandas.DataFrame: A dataframe with annotation and color columns
+        """
+        if hasattr(self, 'annotation_colors') and not self.annotation_colors.empty:
+            print("Annotation colors:")
+            display_df = self.annotation_colors.copy()
+            
+            # Add a status column to show if annotation is active or disabled
+            display_df['status'] = display_df['annotation'].apply(
+                lambda x: 'Active' if x in self.activated_annotations else 'Disabled'
+            )
+            
+            return display_df
+        else:
+            print("No annotation colors have been set up.")
+            return None
+
     def _setup_positive_threshold(self):
         """Get the annotation and set the positive threshold to 50% by default"""
         return  pd.DataFrame({"annotation": self.activated_annotations, "threshold": 50, "Overlay":False})

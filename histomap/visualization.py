@@ -227,19 +227,26 @@ def plot_annotation_overlay(histomap, annotation, disabled_annotations=None, dis
 
 
 
-def plot_annotations(histomap, fill=None, contour=None, annotation=None, display_image=False):
+def plot_annotations(histomap, fill=False, contour=None, annotation=None, display_image=False, alpha=1):
     """Plots the annotations based on the DataFrame, respecting the plot order.
     
     Parameters:
     - histomap: HistoMap object containing annotation data.
     - fill: False, True, or a list of colors. 
             False means no fill (only contours), 
-            True uses the default colormap for fill, 
+            True uses colors from histomap.annotation_colors, 
             a list of colors specifies the fill color for each annotation.
-    - contour: a color or list of colors for the contours. If None, the default colormap is used.
+    - contour: a color or list of colors for the contours. 
+               If None, uses colors from histomap.annotation_colors or default colormap.
     - annotation: a specific annotation (string) or a list of annotations to plot. If None, all annotations are plotted.
     - display_image: bool, whether to display `histomap.plotting_image` beneath the annotations.
+    - alpha: float between 0 and 1, transparency of the fill color (0 is completely transparent, 1 is opaque).
+             Only applies when fill is not False.
     """
+    # Validate alpha parameter
+    if not (0 <= alpha <= 1):
+        raise ValueError("Alpha must be between 0 and 1")
+    
     fig, ax = plt.subplots(figsize=(10, 10))
 
     # Display the image beneath the annotations
@@ -276,7 +283,13 @@ def plot_annotations(histomap, fill=None, contour=None, annotation=None, display
         raise ValueError("No activated annotations to compute overlap.")
 
     # Process fill colors
-    if fill is True:
+    if fill is True and hasattr(histomap, 'annotation_colors'):
+        # Use the annotation_colors dataframe
+        fill_dict = dict(zip(histomap.annotation_colors['annotation'], 
+                            histomap.annotation_colors['color']))
+        fill = [fill_dict.get(ann, cmap(i % 20)) for i, ann in enumerate(annotations_to_plot)]
+    elif fill is True and not hasattr(histomap, 'annotation_colors'):
+        # Fall back to default colormap if annotation_colors doesn't exist
         fill = [cmap(idx % 20) for idx in range(len(annotations_to_plot))]
     elif isinstance(fill, list):
         if len(fill) != len(annotations_to_plot):
@@ -285,15 +298,22 @@ def plot_annotations(histomap, fill=None, contour=None, annotation=None, display
         fill = [None] * len(annotations_to_plot)
     
     # Process contour colors
-    if contour is None:
+    if contour is None and hasattr(histomap, 'annotation_colors'):
+        # Use the annotation_colors dataframe
+        contour_dict = dict(zip(histomap.annotation_colors['annotation'], 
+                               histomap.annotation_colors['color']))
+        contour = [contour_dict.get(ann, cmap(i % 20)) for i, ann in enumerate(annotations_to_plot)]
+    elif contour is None:
         contour = [cmap(idx % 20) for idx in range(len(annotations_to_plot))]
     elif isinstance(contour, list):
         if len(contour) != len(annotations_to_plot):
             raise ValueError("The length of the 'contour' list must match the number of unique annotations.")
     elif isinstance(contour, str):
         contour = [contour] * len(annotations_to_plot)
+        
     # Sort annotations based on plot_order (0 on top)
     data_sorted = histomap.data_exploded.sort_values(by="plot_order", ascending=False)
+    
     # Plot annotations
     for idx, row in data_sorted.iterrows():
         geom = row['geometry']
@@ -309,14 +329,14 @@ def plot_annotations(histomap, fill=None, contour=None, annotation=None, display
         if geom.geom_type == 'Polygon':
             x, y = geom.exterior.xy
             if fill_color:
-                ax.fill(x, y, color=fill_color, edgecolor=contour_color, label=ann)
+                ax.fill(x, y, color=fill_color, edgecolor=contour_color, alpha=alpha, label=ann)
             else:
                 ax.plot(x, y, color=contour_color, label=ann)
         elif geom.geom_type == 'MultiPolygon':
             for polygon in geom:
                 x, y = polygon.exterior.xy
                 if fill_color:
-                    ax.fill(x, y, color=fill_color, edgecolor=contour_color, label=ann)
+                    ax.fill(x, y, color=fill_color, edgecolor=contour_color, alpha=alpha, label=ann)
                 else:
                     ax.plot(x, y, color=contour_color, label=ann)
 
@@ -335,6 +355,7 @@ def plot_annotations(histomap, fill=None, contour=None, annotation=None, display
     plt.gca().invert_yaxis()
     plt.tight_layout()
     plt.show()
+
 
 
 
@@ -439,7 +460,13 @@ def violin_tissue_overlap(histomap, figsize=(8, 6)):
 
 
 def plot_positive_spots(histomap, annotation, display_image=True):
-    """Plot spots colored by whether they are positive for the given annotation(s)."""
+    """Plot spots colored by whether they are positive for the given annotation(s).
+    
+    Parameters:
+    - histomap: HistoMap object containing the spot geodata with annotation_positive columns.
+    - annotation: A string or list of strings representing the annotation(s) to plot.
+    - display_image: Boolean, whether to display the image beneath the cells (True or False).
+    """
     
     # Ensure annotation is always a list
     if isinstance(annotation, str):
@@ -460,6 +487,12 @@ def plot_positive_spots(histomap, annotation, display_image=True):
     if len(annotation) == 1:
         axes = [axes]  # Ensure axes is iterable for a single plot
 
+    # Get the custom color mapping if available
+    color_dict = {}
+    if hasattr(histomap, 'annotation_colors'):
+        color_dict = dict(zip(histomap.annotation_colors['annotation'], 
+                             histomap.annotation_colors['color']))
+
     for ax, ann in zip(axes, annotation):
         # Copy geodata for each annotation
         gdf = histomap.spot_geodata.copy()
@@ -470,9 +503,23 @@ def plot_positive_spots(histomap, annotation, display_image=True):
             extent = [0, histomap.full_res_width, histomap.full_res_height, 0]
             ax.imshow(histomap.plotting_image.values.transpose(1, 2, 0), extent=extent, origin='upper', cmap='gray')
 
-        # Plot spots, coloring by positive/negative status
-        gdf.plot(ax=ax, column=positive_col, cmap='coolwarm', legend=True)
-
+        # Determine colors to use
+        negative_color = 'lightgrey'
+        positive_color = color_dict.get(ann, 'red') if ann in color_dict else 'red'
+        
+        # Create separate GeoDataFrames for positive and negative spots
+        positive_spots = gdf[gdf[positive_col] == True].copy()
+        negative_spots = gdf[gdf[positive_col] == False].copy()
+        
+        # Plot negative spots
+        negative_spots.plot(ax=ax, color=negative_color, label='Negative', alpha=0.6)
+        
+        # Plot positive spots
+        positive_spots.plot(ax=ax, color=positive_color, label=f'{ann} Positive', alpha=0.8)
+        
+        # Add legend with discrete values
+        ax.legend(title=f'{ann}')
+        
         # Set title and axis labels
         ax.set_title(f'Spot Plot for {ann} (Positive/Negative)', fontsize=15)
         ax.set_xlabel('X Coordinate', fontsize=12)
@@ -481,7 +528,7 @@ def plot_positive_spots(histomap, annotation, display_image=True):
     plt.tight_layout()
     plt.show()
 
-def plot_annotation_order(histomap, fill=None, contour=None, annotation=None, display_image=False):
+def plot_annotation_order(histomap, fill=False, contour=None, annotation=None, display_image=False):
     """Plots the annotations in 3D based on the DataFrame, respecting the plot order.
     
     Parameters:
@@ -490,7 +537,9 @@ def plot_annotation_order(histomap, fill=None, contour=None, annotation=None, di
             False means no fill (only contours), 
             True uses the default colormap for fill, 
             a list of colors specifies the fill color for each annotation.
-    - contour: a color or list of colors for the contours. If None, the default colormap is used.
+            If None, uses colors from histomap.annotation_colors.
+    - contour: a color or list of colors for the contours. 
+               If None, uses colors from histomap.annotation_colors or default colormap.
     - annotation: a specific annotation (string) or a list of annotations to plot. If None, all annotations are plotted.
     - display_image: bool, whether to display `histomap.plotting_image` beneath the annotations.
     """
@@ -552,13 +601,16 @@ def plot_annotation_order(histomap, fill=None, contour=None, annotation=None, di
         'plot_order': [annotation_plot_order[ann] for ann in unique_annotations]  # Matching plot_order
     })
     
-    print(rectangle_gdf)
-    print(tmp_data_exploded.columns)
     # Concatenate the new GeoDataFrame (rectangle_gdf) with the existing one (tmp_data_exploded)
     gdf = pd.concat([tmp_data_exploded, rectangle_gdf], ignore_index=True)
-    #####
+    
     # Process fill colors
-    if fill is True:
+    if fill is None and hasattr(histomap, 'annotation_colors'):
+        # Use the annotation_colors dataframe
+        fill_dict = dict(zip(histomap.annotation_colors['annotation'], 
+                            histomap.annotation_colors['color']))
+        fill = [fill_dict.get(ann, cmap(i % 20)) for i, ann in enumerate(annotations_to_plot)]
+    elif fill is True:
         fill = [cmap(idx % 20) for idx in range(len(annotations_to_plot))]
     elif isinstance(fill, list):
         if len(fill) != len(annotations_to_plot):
@@ -567,7 +619,12 @@ def plot_annotation_order(histomap, fill=None, contour=None, annotation=None, di
         fill = [None] * len(annotations_to_plot)
     
     # Process contour colors
-    if contour is None:
+    if contour is None and hasattr(histomap, 'annotation_colors'):
+        # Use the annotation_colors dataframe
+        contour_dict = dict(zip(histomap.annotation_colors['annotation'], 
+                               histomap.annotation_colors['color']))
+        contour = [contour_dict.get(ann, cmap(i % 20)) for i, ann in enumerate(annotations_to_plot)]
+    elif contour is None:
         contour = [cmap(idx % 20) for idx in range(len(annotations_to_plot))]
     elif isinstance(contour, list):
         if len(contour) != len(annotations_to_plot):
@@ -615,7 +672,6 @@ def plot_annotation_order(histomap, fill=None, contour=None, annotation=None, di
     by_label = dict(zip(labels, handles))
     ax.legend(by_label.values(), by_label.keys(), bbox_to_anchor=(1, 1))
 
-
     # Hide grid lines
     ax.grid(False)
     ax.set_zticks([])
@@ -633,7 +689,13 @@ def plot_annotation_order(histomap, fill=None, contour=None, annotation=None, di
 
 
 def plot_annotation_map(histomap, display_image=True):
-    """Plot spots colored by their assigned annotations in the Annotation_map."""
+    """Plot spots colored by their assigned annotations in the Annotation_map.
+    Uses colors from histomap.annotation_colors if available.
+    
+    Parameters:
+    - histomap: HistoMap object containing the spot geodata with 'Annotation_map' column.
+    - display_image: Boolean, whether to display the image beneath the cells (True or False).
+    """
     
     # Ensure the required column exists
     if 'Annotation_map' not in histomap.spot_geodata.columns:
@@ -655,8 +717,14 @@ def plot_annotation_map(histomap, display_image=True):
     if len(unique_annotations) == 0:
         raise ValueError("No annotations found in the 'Annotation_map' column.")
     
-    # Color each annotation differently
-    cmap = plt.cm.get_cmap('tab20', len(unique_annotations))  # Use a categorical colormap
+    # Get colors from annotation_colors if available, or use a default colormap
+    color_dict = {}
+    if hasattr(histomap, 'annotation_colors'):
+        color_dict = dict(zip(histomap.annotation_colors['annotation'], 
+                             histomap.annotation_colors['color']))
+        
+    # Default colormap as fallback
+    cmap = plt.cm.get_cmap('tab20', len(unique_annotations))
     
     for i, annotation in enumerate(unique_annotations):
         # Filter spots for the current annotation
@@ -672,9 +740,12 @@ def plot_annotation_map(histomap, display_image=True):
             x_coords = annotation_spots.geometry.centroid.x
             y_coords = annotation_spots.geometry.centroid.y
 
+        # Use color from annotation_colors if available, otherwise use default colormap
+        spot_color = color_dict.get(annotation, cmap(i))
+        
         # Plot the spots for this annotation with a specific color
         ax.scatter(x_coords, y_coords, label=annotation, 
-                   color=cmap(i), s=20, edgecolors='k', alpha=0.6)
+                   color=spot_color, s=20, edgecolors='k', alpha=0.6)
     
     # Set title and axis labels
     ax.set_title('Spots Colored by Annotations in Annotation_map', fontsize=15)
@@ -690,7 +761,7 @@ def plot_annotation_map(histomap, display_image=True):
 def plot_annotation_map_proportions(histomap):
     """
     Plots the proportion of each annotation present in histomap.spot_geodata['Annotation_map'] 
-    as a stacked bar plot.
+    as a stacked bar plot. Uses colors from histomap.annotation_colors if available.
 
     Parameters:
     - histomap: An instance of the histomap object.
@@ -707,15 +778,39 @@ def plot_annotation_map_proportions(histomap):
 
     # Normalize to get proportions
     annotation_proportions = annotation_counts / annotation_counts.sum()
+    
+    # Create custom colors if annotation_colors is available
+    colors = plt.cm.Paired.colors  # Default colors
+    
+    if hasattr(histomap, 'annotation_colors'):
+        # Create a mapping from annotation to color
+        color_dict = dict(zip(histomap.annotation_colors['annotation'], 
+                              histomap.annotation_colors['color']))
+        
+        # Create a list of colors for each annotation in the proportion data
+        custom_colors = []
+        for annotation in annotation_proportions.index:
+            # Use the custom color if available, otherwise use a default color
+            custom_colors.append(color_dict.get(annotation, plt.cm.Paired(len(custom_colors) % 10)))
+        
+        # If we have custom colors, use them instead of the default
+        if custom_colors:
+            colors = custom_colors
+    
     # Plotting
     plt.figure(figsize=(10, 6))
-    annotation_proportions.plot(kind='bar', color=plt.cm.Paired.colors)
+    ax = annotation_proportions.plot(kind='bar', color=colors)
     
     # Set plot labels and title
     plt.xlabel('Annotations')
     plt.ylabel('Proportion')
     plt.title('Proportions of Annotations in Annotation_map')
     plt.xticks(rotation=45)
+    
+    # Add percentage labels on top of each bar
+    for i, v in enumerate(annotation_proportions):
+        ax.text(i, v + 0.01, f"{v:.1%}", ha='center', fontsize=9)
+    
     plt.tight_layout()
     plt.show()
 
