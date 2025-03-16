@@ -1,43 +1,56 @@
-# Configuration file for the Sphinx documentation builder
-
+# docs/conf.py
 import os
 import sys
-sys.path.insert(0, os.path.abspath('..'))  # Path to the root of your project
+sys.path.insert(0, os.path.abspath('..'))
 
 # Project information
 project = 'HistoMapTx'
-copyright = '2025, Your Name'
-author = 'Your Name'
+copyright = '2023-2025, HistoMapTx Contributors'
+author = 'HistoMapTx Contributors'
+version = '0.1.0'
+release = '0.1.0'
 
-# Add extensions
+# General configuration
 extensions = [
-    'sphinx.ext.autodoc',  # Include documentation from docstrings
-    'sphinx.ext.viewcode',  # Add links to source code
-    'sphinx.ext.napoleon',  # Support for NumPy and Google style docstrings
-    'sphinx_autodoc_typehints',  # Use type hints for docs
-    'nbsphinx',  # For including Jupyter notebooks
-    'sphinx_gallery.gen_gallery',  # For code examples
+    'sphinx.ext.autodoc',       # API docs from docstrings
+    'sphinx.ext.viewcode',      # View source code
+    'sphinx.ext.napoleon',      # Support NumPy and Google docstrings
+    'sphinx.ext.intersphinx',   # Link to other projects' docs
+    'sphinx_autodoc_typehints', # Type hints in docs
+    'nbsphinx',                 # Jupyter notebook support
+    'sphinx_copybutton',        # Add copy buttons to code blocks
 ]
 
-# Theme
+# Napoleon settings
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
+napoleon_use_param = True
+napoleon_use_rtype = False
+napoleon_use_ivar = True
+
+# Theme settings
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
-
-# Include Python files as both source files and executables
-nbsphinx_execute = 'always'
-
-# Syntax highlighting
-pygments_style = 'sphinx'
-
-# Include private members
-autodoc_default_options = {
-    'members': True,
-    'undoc-members': True,
-    'private-members': False,
+html_css_files = ['custom.css']
+html_logo = '../figures/logo.png'
+html_theme_options = {
+    'logo_only': False,
+    'display_version': True,
+    'navigation_depth': 4,
 }
 
-sphinx_gallery_conf = {
-    'examples_dirs': '../tutorials',  # path to your example scripts
-    'gallery_dirs': 'auto_examples',  # where to save gallery generated output
-    'filename_pattern': '/tutorials_',  # pattern to match example files
+# Notebook settings
+nbsphinx_execute = 'auto'
+nbsphinx_allow_errors = False
+nbsphinx_timeout = 600
+
+# Cross-reference other documentation
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/3', None),
+    'numpy': ('https://numpy.org/doc/stable', None),
+    'pandas': ('https://pandas.pydata.org/docs', None),
+    'matplotlib': ('https://matplotlib.org/stable', None),
 }
+
+# Ignore certain files/patterns
+exclude_patterns = ['_build', '**.ipynb_checkpoints']
