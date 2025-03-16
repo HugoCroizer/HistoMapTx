@@ -15,9 +15,7 @@ and visualizing GeoJSON-based tissue annotations with spatial transcriptomics sp
    :maxdepth: 2
    :caption: Contents:
 
-   guide/index
-   tutorials/index
-   api/index
+   tutorials/tutorials
 
 Quick Start
 ----------
