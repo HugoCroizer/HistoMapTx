@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A Python library for analyzing histological annotations alongside spatial transcriptomics data"
 readme = "README.md"
 authors = [
-    {name = "Hugo Croizer", email = "hugocroizer83330@gmail.com"},
+    {name = "Your Name", email = "your.email@example.com"},
 ]
 license = {text = "MIT"}
 classifiers = [
@@ -23,11 +23,8 @@ dependencies = [
     "numpy",
     "matplotlib",
     "plotly",
-    "scipy",
+    "scipy", 
     "shapely",
-    "scanpy",
-    "spatialdata",
-    "spatialdata_io",
 ]
 requires-python = ">=3.8"
 
@@ -35,3 +32,6 @@ requires-python = ">=3.8"
 Homepage = "https://github.com/Dantferno/HistoMapTx"
 Documentation = "https://histomaptx.readthedocs.io"
 Repository = "https://github.com/Dantferno/HistoMapTx"
+
+[tool.setuptools]
+packages = ["histomap"]  # Explicitly list only your main package directory
