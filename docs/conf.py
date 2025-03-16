@@ -35,3 +35,9 @@ autodoc_default_options = {
     'undoc-members': True,
     'private-members': False,
 }
+
+sphinx_gallery_conf = {
+    'examples_dirs': '../tutorials',  # path to your example scripts
+    'gallery_dirs': 'auto_examples',  # where to save gallery generated output
+    'filename_pattern': '/tutorials_',  # pattern to match example files
+}
