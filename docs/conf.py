@@ -28,6 +28,14 @@ napoleon_use_param = True
 napoleon_use_rtype = False
 napoleon_use_ivar = True
 
+# Autodoc settings
+autodoc_default_options = {
+    'members': True,
+    'undoc-members': True,
+    'show-inheritance': True,
+    'special-members': '__init__',
+}
+
 # Theme settings
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
