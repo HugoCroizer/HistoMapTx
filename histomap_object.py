@@ -171,22 +171,22 @@ class HistoMap:
 
     def add_segmentation(self, segmentation_file, file_type="geojson"):
         """ read geojson segmentation from qupath and return a segmentation dataset """
-        if file_type=="geojson":
-            gpd = self.read_geojson_based_on_type(segmentation_file)
-        else:
-            raise ValueError("Only geojson files are supported now")
-        # Convert 'measurements' to JSON 
-        gpd['measurements'] = gpd['measurements'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
-
-        # Now extract the key-value pairs and add them as columns
-        measurements_df = gpd['measurements'].apply(pd.Series)
-
-        # Concatenate the new columns with the original GeoDataFrame
-        gpd = pd.concat([gpd, measurements_df], axis=1)
-        # Only keep annotations identified as cells 
-        gpd = gpd[gpd['objectType'] == 'cell']
-        self.segmentation_dataframe = gpd
-        print(str(gdf.shape[0]) + ' cells detected.') 
+        segmentation_df = self.read_geojson_based_on_type(segmentation_file)
+        # only keep cell and not annotation
+        segmentation_df = segmentation_df[segmentation_df['objectType'] == 'cell']
+        self.spot_geodata['n_cell'] = 0
+        # Loop over each spot and count overlapping cells
+        for idx, spot in self.spot_geodata.iterrows():
+            # Get the geometry of the current spot
+            spot_geom = spot['geometry']
+            
+            # Find all cells that intersect with the spot
+            overlapping_cells = segmentation_df[segmentation_df['geometry'].intersects(spot_geom)]
+            
+            # Count the number of overlapping cells
+            self.spot_geodata.at[idx, 'n_cell'] = len(overlapping_cells)
+        self.segmentation_dataframe = segmentation_df
+        print('Segmentation added. Number of cells in the file :'+ str(len(segmentation_df.index))+ ". Average cell per spot : " + str(self.spot_geodata['n_cell'].mean()))
             
     def add_area_column(self):
         """Adds an area column to the dataframe (in square units)."""
@@ -529,7 +529,10 @@ class HistoMap:
         # transfer the metadata 
         df1 = spot_geodata.drop(columns='geometry', inplace=False)
         df2 = adata.obs
-        df_merged = pd.merge(df2, df1, on='spot_id', how='left')
+        # Perform the merge, keeping only the columns from df1 (spot_geodata)
+        df_merged = pd.merge(df2, df1, on='spot_id', how='left', suffixes=('', '_drop'))
+        # Drop the unwanted columns (from df2) that have the '_drop' suffix
+        df_merged = df_merged.loc[:, ~df_merged.columns.str.endswith('_drop')]
         df_merged.index = df2.index
         adata.obs = df_merged
         return adata
@@ -558,6 +561,9 @@ class HistoMap:
         return df_merged
     
     def generate_annotation_map(self, annotate_all=True):
+        """Generate annotation map based on plot_order and positivity"""
+        # Create 'Annotation_map' column if it doesn't exist or reset it
+        self.spot_geodata['Annotation_map'] = "None"
         for annotation in self.activated_annotations:
             # Check if the annotation exists in 'positive_threshold' with Overlay set to True
             positive_threshold_row = self.positive_threshold[self.positive_threshold['annotation'] == annotation]
@@ -575,8 +581,7 @@ class HistoMap:
             if positive_column not in self.spot_geodata.columns:
                 raise ValueError(f"Column '{positive_column}' does not exist in 'spot_geodata'.")
 
-            # Create or reset the Annotation_map
-            self.spot_geodata['Annotation_map'] = "None"
+            
 
             # Get the 'plot_order' for the current annotation
             plot_order = self.data_exploded.loc[self.data_exploded['Annotation'] == annotation, 'plot_order'].iloc[0]

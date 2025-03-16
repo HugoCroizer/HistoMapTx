@@ -1,0 +1,12 @@
+sphinx>=4.0.0
+sphinx-rtd-theme>=1.0.0
+sphinx-autodoc-typehints
+nbsphinx  # For including Jupyter notebooks in docs
+sphinx-gallery  # For code examples
+matplotlib
+numpy
+pandas
+geopandas
+plotly
+scipy
+shapely

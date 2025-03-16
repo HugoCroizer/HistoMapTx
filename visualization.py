@@ -16,25 +16,28 @@ import numpy as np
 from . import histomap_utils
 import seaborn as sns 
 
-def plot_cells(histomap, fill=True, contour='k'):
+def plot_cells(histomap, fill=True, contour='k', display_image=True):
     """
-    Plots segmented cells based on a GeoDataFrame.
+    Plots segmented cells based on a GeoDataFrame and optionally displays an image beneath the cells.
 
     Parameters:
-    - gdf: GeoDataFrame containing segmented cell geometries.
+    - histomap: HistoMap object containing the segmentation dataframe and spot geodata.
     - fill: False, True, or a list of colors.
         - False: No fill (only contours).
         - True: Uses a default colormap ('tab20') for fill.
         - List of colors: Specifies the fill color for each cell.
     - contour: Color or list of colors for the contours. If None, the default colormap is used.
+    - display_image: Boolean, whether to display the image beneath the cells (True or False).
     """
-    if histomap.segmentation_dataframe is False:
-        raise ValueError("No segmentation dataframe in this HistoMap object. Add one with the method .add_segmentation") 
+    # Check if 'n_cell' exists in spot_geodata
+    if 'n_cell' not in histomap.spot_geodata.columns:
+        raise ValueError("'n_cell' column does not exist in spot_geodata. Please ensure segmentation has been added correctly.")
+    
     fig, ax = plt.subplots(figsize=(10, 10))
     gdf = histomap.segmentation_dataframe
+    
     # Default colormap
     cmap = plt.colormaps.get_cmap('tab20')
-
     unique_cells = len(gdf)
 
     # Handle fill colors
@@ -53,6 +56,11 @@ def plot_cells(histomap, fill=True, contour='k'):
         contour = [contour] * unique_cells  # Convert single color to list
     elif isinstance(contour, list) and len(contour) != unique_cells:
         raise ValueError("The length of the 'contour' list must match the number of cells.")
+
+    # Display the image beneath the cells (if requested and available)
+    if display_image and hasattr(histomap, 'plotting_image') and histomap.plotting_image is not None:
+        extent = [0, histomap.full_res_width, histomap.full_res_height, 0]
+        ax.imshow(histomap.plotting_image.values.transpose(1, 2, 0), extent=extent, origin='upper', cmap='gray')
 
     # Plot cells
     for idx, (geom, fill_color, contour_color) in enumerate(zip(gdf.geometry, fill, contour)):
@@ -86,6 +94,7 @@ def plot_cells(histomap, fill=True, contour='k'):
     plt.gca().invert_yaxis()
     plt.tight_layout()
     plt.show()
+
 
 def plot_combined_annotation_overlap(histomap, annotation1, annotation2):
     """
@@ -709,3 +718,51 @@ def plot_annotation_map_proportions(histomap):
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.show()
+
+def plot_cell_density(histomap, display_image=True, max_cutoff=None):
+    """
+    Plots the cell density (n_cell) for each spot in the histomap, optionally displaying an image beneath the cells.
+
+    Parameters:
+    - histomap: HistoMap object containing the spot geodata with 'n_cell' column.
+    - display_image: Boolean, whether to display the image beneath the cells (True or False).
+    - max_cutoff: Optional, the maximum value for the color scale. If None, the maximum value in 'n_cell' will be used.
+    """
+    # Check if 'n_cell' exists in spot_geodata
+    if 'n_cell' not in histomap.spot_geodata.columns:
+        raise ValueError("'n_cell' column does not exist in spot_geodata. Please ensure segmentation has been added correctly.")
+
+    # Create a subplot grid for displaying the plot
+    fig, ax = plt.subplots(figsize=(10, 10))
+
+    # Copy the spot_geodata for plotting
+    gdf = histomap.spot_geodata.copy()
+
+    # Convert 'n_cell' to float if necessary
+    gdf['n_cell'] = gdf['n_cell'].astype(float)
+
+    # Display the image beneath the cells
+    if display_image and hasattr(histomap, 'plotting_image') and histomap.plotting_image is not None:
+        extent = [0, histomap.full_res_width, histomap.full_res_height, 0]
+        ax.imshow(histomap.plotting_image.values.transpose(1, 2, 0), extent=extent, origin='upper', cmap='gray')
+
+    # If max_cutoff is provided, set vmax to it, otherwise, use the maximum value in the data
+    vmin = gdf['n_cell'].min()
+    vmax = max_cutoff if max_cutoff is not None else gdf['n_cell'].max()
+
+    # Plot the polygons with a colormap based on the 'n_cell' values
+    gdf.plot(ax=ax, column='n_cell', cmap='viridis', legend=True,
+             legend_kwds={'label': 'Number of Cells',
+                          'orientation': "horizontal"},
+             vmin=vmin, vmax=vmax)  # Apply max_cutoff (vmax) to the color scale
+
+    # Set title and axis labels
+    ax.set_title('Spot Plot Colored by Cell Density (n_cell)', fontsize=15)
+    ax.set_xlabel('X Coordinate', fontsize=12)
+    ax.set_ylabel('Y Coordinate', fontsize=12)
+
+    # Adjust layout
+    plt.tight_layout()
+    plt.show()
+
+

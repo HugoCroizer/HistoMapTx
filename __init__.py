@@ -1,6 +1,7 @@
 from .histomap_object import HistoMap
 from .visualization import *
 from .histomap_utils import load_histomap
+from .distances import *
 import geopandas as gpd
 import pandas as pd
 import ast
