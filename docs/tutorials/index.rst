@@ -14,8 +14,8 @@ Each tutorial includes practical examples with sample data and explanations of k
    :maxdepth: 1
    :caption: Tutorial Notebooks:
 
-   ../notebooks/1_Mapping_annotations.ipynb
-   ../notebooks/2_Mapping_annotations_HD.ipynb
+   ../notebooks/Mapping_annotations_tuto.ipynb
+   ../notebooks/Mapping_annotation_HD.ipynb
 
 
 
