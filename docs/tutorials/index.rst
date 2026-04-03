@@ -26,5 +26,5 @@ Getting Help
 If you encounter issues while following these tutorials, please:
 
 - Check the :ref:`API documentation <api>` for detailed function descriptions
-- Visit our `GitHub repository <https://github.com/Dantferno/HistoMapTx>`_ for the latest updates
+- Visit our `GitHub repository <https://github.com/must-bioinfo/HistoMap>`_ for the latest updates
 - Report bugs or ask questions in the GitHub issues section
