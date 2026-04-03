@@ -42,14 +42,3 @@ If you prefer using pip, you can install HistoMapTx directly:
 Note that you'll need to ensure all dependencies are properly installed, which may be more challenging than using Conda.
 
 
-Verifying Installation
--------------------
-
-To verify HistoMapTx is correctly installed, run:
-
-.. code-block:: python
-
-   import histomap
-   print(histomap.__version__)
-
-If this runs without errors, your installation is successful.
