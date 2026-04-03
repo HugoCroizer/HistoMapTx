@@ -42,31 +42,6 @@ If you prefer using pip, you can install HistoMapTx directly:
 Note that you'll need to ensure all dependencies are properly installed, which may be more challenging than using Conda.
 
 
-Troubleshooting
--------------
-
-Common installation issues and their solutions:
-
-GeoPandas Installation Issues
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-If you encounter issues installing GeoPandas, try:
-
-.. code-block:: bash
-
-   conda install -c conda-forge geopandas
-
-This ensures all GeoPandas dependencies are correctly installed.
-
-Platform-Specific Notes
-^^^^^^^^^^^^^^^^^^^^^
-
-**Windows Users**:
-   Shapely and other geospatial libraries might require additional steps. Using Conda is strongly recommended.
-
-**Mac M1/M2 Users**:
-   Make sure to use the arm64 version of Conda for best performance.
-
 Verifying Installation
 -------------------
 

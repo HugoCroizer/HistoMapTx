@@ -17,4 +17,4 @@ and visualizing GeoJSON-based tissue annotations with spatial transcriptomics sp
 
    installation/index
    tutorials/index
-   api/index
+
