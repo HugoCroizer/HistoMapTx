@@ -7,9 +7,7 @@ name = "histomaptx"
 version = "0.1.0"
 description = "A Python library for analyzing histological annotations alongside spatial transcriptomics data"
 readme = "README.md"
-authors = [
-    {name = "Your Name", email = "your.email@example.com"},
-]
+
 license = {text = "MIT"}
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -17,15 +15,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 keywords = ["spatial transcriptomics", "histology", "annotations", "visium"]
-dependencies = [
-    "geopandas",
-    "pandas",
-    "numpy",
-    "matplotlib",
-    "plotly",
-    "scipy", 
-    "shapely",
-]
+
 requires-python = ">=3.8"
 
 [project.urls]
@@ -33,5 +23,3 @@ Homepage = "https://github.com/Dantferno/HistoMapTx"
 Documentation = "https://histomaptx.readthedocs.io"
 Repository = "https://github.com/Dantferno/HistoMapTx"
 
-[tool.setuptools]
-packages = ["histomap"]  # Explicitly list only your main package directory
