@@ -1,7 +1,7 @@
 HistoMapTx Documentation
 ========================
 
-.. image:: .logo.svg
+.. image:: logo.png
    :align: right
    :width: 150px
 
