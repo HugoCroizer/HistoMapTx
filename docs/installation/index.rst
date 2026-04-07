@@ -1,44 +1,31 @@
 Installation
 ===========
 
-This guide covers different methods to install HistoMapTx, with Conda being the recommended approach.
+This guide covers how to install HistoMapTx. We recommend using a Python virtual environment (venv).
 
-Conda Installation (Recommended)
--------------------------------
+Venv Installation (Recommended)
+--------------------------------
 
-The recommended way to install HistoMapTx is using Conda, which helps manage dependencies efficiently:
-
-1. First, make sure you have Conda installed (either `Miniconda <https://docs.conda.io/en/latest/miniconda.html>`_ or `Anaconda <https://www.anaconda.com/products/distribution>`_)
-
-2. Create a new environment for HistoMapTx:
+1. Create and activate a virtual environment:
 
    .. code-block:: bash
 
-      conda create -n histomap python=3.10
-      conda activate histomap
+      python3 -m venv histomap_env
+      source histomap_env/bin/activate  # On Windows: histomap_env\Scripts\activate
 
-3. Install required dependencies:
-
-   .. code-block:: bash
-
-      conda install -c conda-forge geopandas pandas numpy matplotlib plotly scipy shapely
-      conda install -c conda-forge jupyterlab  # for running tutorial notebooks
-
-4. Install HistoMapTx using pip:
+2. Install HistoMapTx:
 
    .. code-block:: bash
 
       pip install histomaptx
 
-Pip Installation
---------------
+Conda
+-----
 
-If you prefer using pip, you can install HistoMapTx directly:
+.. warning::
 
-.. code-block:: bash
-
-   pip install histomaptx
-
-Note that you'll need to ensure all dependencies are properly installed, which may be more challenging than using Conda.
-
+   Installing HistoMapTx in a Conda environment may cause issues with ``pkg_resources``
+   (a dependency of ``xarray_schema``, itself a transitive dependency of ``spatialdata``).
+   If you encounter a ``ModuleNotFoundError: No module named 'pkg_resources'`` error,
+   use a venv instead.
 
