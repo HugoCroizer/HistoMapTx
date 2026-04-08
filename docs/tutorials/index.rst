@@ -14,6 +14,7 @@ Each tutorial includes practical examples with sample data and explanations of k
    :maxdepth: 1
    :caption: Tutorial Notebooks:
 
+   ../notebooks/0_Input_and_QuPath_annotation.ipynb
    ../notebooks/Mapping_annotations_tuto.ipynb
    ../notebooks/Mapping_annotation_HD.ipynb
 
