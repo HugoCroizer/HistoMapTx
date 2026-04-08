@@ -16,7 +16,8 @@ Each tutorial includes practical examples with sample data and explanations of k
 
    ../notebooks/0_Input_and_QuPath_annotation.ipynb
    ../notebooks/Mapping_annotations_tuto.ipynb
-   ../notebooks/Mapping_annotation_HD.ipynb
+   ../notebooks/1_Tissue_detection_HD.ipynb
+   ../notebooks/2_Mapping_annotation_HD.ipynb
 
 
 
